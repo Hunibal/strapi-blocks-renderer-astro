@@ -1,0 +1,119 @@
+---
+/**
+ * ExamplePage.astro
+ * 
+ * Example of how to fetch and render Strapi Blocks content in an Astro page
+ */
+
+import StrapiBlocksRenderer from './StrapiBlocksRenderer.astro';
+
+// Define your Strapi API endpoint
+const STRAPI_URL =  'http://localhost:1337';
+
+// Fetch article data from Strapi
+async function getArticle(slug) {
+  try {
+    // Example query with dynamic API endpoint
+    const response = await fetch(
+      `${STRAPI_URL}/api/articles?filters[slug][$eq]=${slug}&populate[featuredImage]=*&populate[author]=*&populate[categories]=*`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch article: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // Return the first article that matches the slug
+    return data.data?.[0] || null;
+  } catch (error) {
+    console.error('Error fetching article:', error);
+    return null;
+  }
+}
+
+// Get the article slug from the URL
+const { slug } = Astro.params;
+
+// Fetch the article data
+const article = await getArticle(slug);
+
+// Extract the article attributes
+const {
+  title,
+  publishedAt,
+  content,
+  featuredImage,
+  author,
+  categories
+} = article?.attributes || {};
+
+// Format the publication date
+const formattedDate = publishedAt 
+  ? new Date(publishedAt).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+  : '';
+---
+
+<html title={title || 'Article Not Found'}>
+    <body>
+        {article ? (
+            <article class="max-w-3xl mx-auto px-4 py-8">
+            <header class="mb-8">
+                <h1 class="text-4xl font-bold mb-2">{title}</h1>
+                
+                {/* Publication metadata */}
+                <div class="flex items-center text-gray-600 mb-6">
+                {author?.data?.attributes?.name && (
+                    <span class="mr-4">By {author.data.attributes.name}</span>
+                )}
+                {formattedDate && (
+                    <time datetime={publishedAt}>{formattedDate}</time>
+                )}
+                </div>
+                
+                {/* Featured Image */}
+                {featuredImage?.data?.attributes?.url && (
+                <img 
+                    src={featuredImage.data.attributes.url}
+                    alt={featuredImage.data.attributes.alternativeText || title}
+                    class="w-full h-auto rounded-lg"
+                    width={featuredImage.data.attributes.width}
+                    height={featuredImage.data.attributes.height}
+                />
+                )}
+            </header>
+
+            {/* Render the Strapi Blocks content */}
+            <div class="prose max-w-none">
+                <StrapiBlocksRenderer content={content} />
+            </div>
+
+            {/* Categories */}
+            {categories?.data?.length > 0 && (
+                <div class="mt-8 pt-6 border-t border-gray-200">
+                <h2 class="text-sm uppercase tracking-wider font-semibold text-gray-600 mb-2">Categories</h2>
+                <div class="flex flex-wrap gap-2">
+                    {categories.data.map(category => (
+                    <span class="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm">
+                        {category.attributes.name}
+                    </span>
+                    ))}
+                </div>
+                </div>
+            )}
+            </article>
+        ) : (
+            <div class="text-center py-20">
+            <h1 class="text-4xl font-bold text-gray-800">Article Not Found</h1>
+            <p class="mt-4 text-xl text-gray-600">The article you're looking for doesn't exist or has been moved.</p>
+            <a href="/" class="mt-8 inline-block bg-blue-600 text-white px-6 py-3 rounded-lg">
+                Return Home
+            </a>
+            </div>
+    )}
+  </body>
+</html>

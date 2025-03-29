@@ -1,0 +1,268 @@
+---
+/**
+ * StrapiBlocksRenderer.astro
+ * =========================
+ * 
+ * A component that renders Strapi Blocks API content in Astro without React dependencies.
+ * This component takes Strapi's block-based content structure and renders it as HTML.
+ * 
+ * Features:
+ * - Renders all standard Strapi block types (paragraph, heading, list, quote, code, image, link)
+ * - Supports all text modifiers (bold, italic, underline, strikethrough, code)
+ * - Handles nested structures like formatted text within list items
+ * - Uses Astro's set:html directive for rendering HTML content
+ * - Includes basic styling classes (compatible with Tailwind CSS)
+ * 
+ * Security Note:
+ * - This component uses set:html to render content from Strapi blocks
+ * - It assumes content from your Strapi instance is trusted
+ * - Only use this component with content from secure sources where you control access
+ * 
+ * @author Julian von Tiedemann
+ * @license MIT
+ */
+
+// Import types from the dedicated types file
+import type { 
+  StrapiBlock, 
+  BlockNode, 
+  TextNode, 
+  LinkNode, 
+  ListItemNode, 
+  BlockChildren 
+} from './types/strapi-blocks';
+
+// Define component props interface
+export interface Props {
+  content: StrapiBlock[];
+  className?: string; // Optional class name for the container
+}
+
+// Get the content from props
+const { content, className = '' } = Astro.props;
+
+/**
+ * Validates a URL to prevent javascript: protocol exploitation
+ * 
+ * @param url The URL to validate
+ * @returns Safe URL or # if unsafe
+ */
+function validateUrl(url: string): string {
+  if (!url) return '#';
+  
+  // Check for javascript: protocol or other potentially dangerous protocols
+  const sanitizedUrl = url.trim().toLowerCase();
+  if (
+    sanitizedUrl.startsWith('javascript:') || 
+    sanitizedUrl.startsWith('data:') ||
+    sanitizedUrl.startsWith('vbscript:')
+  ) {
+    console.warn(`Potentially dangerous URL blocked: ${url}`);
+    return '#';
+  }
+  
+  return url;
+}
+
+/**
+ * Renders a text node with its modifiers (bold, italic, etc.)
+ * Applies modifiers in the correct order (from inside out)
+ * 
+ * @param node The text node to render
+ * @returns HTML string with proper formatting
+ */
+function renderText(node: TextNode): string {
+  if (!node || !node.text) return '';
+  
+  let text = node.text;
+  
+  // Apply text modifiers in the correct nesting order (inside-out)
+  // This ensures proper HTML hierarchy for nested modifiers
+  if (node.code) {
+    text = `<code class="px-1 bg-gray-100 rounded text-sm font-mono">${text}</code>`;
+  }
+  if (node.strikethrough) {
+    text = `<s>${text}</s>`;
+  }
+  if (node.underline) {
+    text = `<u>${text}</u>`;
+  }
+  if (node.italic) {
+    text = `<em>${text}</em>`;
+  }
+  if (node.bold) {
+    text = `<strong>${text}</strong>`;
+  }
+  
+  return text;
+}
+
+/**
+ * Renders all children of a block (text nodes, links, etc.)
+ * 
+ * @param children Array of child nodes
+ * @returns HTML string of rendered children
+ */
+function renderChildren(children: BlockChildren | undefined): string {
+  if (!children || !Array.isArray(children) || children.length === 0) {
+    return '';
+  }
+  
+  return children.map(child => {
+    // Handle text nodes (with potential modifiers)
+    if (child && child.type === 'text') {
+      return renderText(child as TextNode);
+    } 
+    // Handle link nodes
+    else if (child && child.type === 'link') {
+      const linkNode = child as LinkNode;
+      const linkContent = linkNode.children ? linkNode.children.map(c => renderText(c)).join('') : '';
+      const targetAttr = linkNode.openInNewTab ? '_blank' : undefined;
+      const relAttr = linkNode.openInNewTab ? 'noopener noreferrer' : undefined;
+      // Validate URL to prevent javascript: protocol exploitation
+      const safeUrl = validateUrl(linkNode.url);
+      return `<a href="${safeUrl}" ${targetAttr ? `target="${targetAttr}"` : ''} ${relAttr ? `rel="${relAttr}"` : ''} class="text-blue-600 hover:underline">${linkContent}</a>`;
+    } 
+    // For other node types that might be nested
+    else {
+      return '';
+    }
+  }).join('');
+}
+---
+
+<!-- Main container with optional class name -->
+<div class={className}>
+  {/* Render each block based on its type */}
+{content && Array.isArray(content) && content.map((block) => {
+  if (!block || !block.type) return null;
+  
+  switch (block.type) {
+    // Paragraph block
+    case 'paragraph':
+      return <p class="my-4" set:html={renderChildren(block.children)} />;
+
+    // Heading block (h1-h6)
+    case 'heading': {
+      const headingBlock = block as BlockNode;
+      const level = headingBlock.level || 2;
+      switch (level) {
+        case 1:
+          return <h1 class="text-3xl font-bold my-6" set:html={renderChildren(headingBlock.children)} />;
+        case 2:
+          return <h2 class="text-2xl font-bold my-5" set:html={renderChildren(headingBlock.children)} />;
+        case 3:
+          return <h3 class="text-xl font-bold my-4" set:html={renderChildren(headingBlock.children)} />;
+        case 4:
+          return <h4 class="text-lg font-bold my-3" set:html={renderChildren(headingBlock.children)} />;
+        case 5:
+          return <h5 class="text-base font-bold my-2" set:html={renderChildren(headingBlock.children)} />;
+        case 6:
+          return <h6 class="text-sm font-bold my-2" set:html={renderChildren(headingBlock.children)} />;
+        default:
+          // Fallback to h2 if level is not specified or invalid
+          return <h2 class="text-2xl font-bold my-5" set:html={renderChildren(headingBlock.children)} />;
+      }
+    }
+    
+    // Image block
+    case 'image': {
+      const imageBlock = block as BlockNode;
+      const imageData = imageBlock.image;
+      if (!imageData) return null;
+      
+      const imageUrl = imageData.url || '';
+      const altText = imageData.alternativeText || '';
+      const caption = imageData.caption || '';
+      
+      return (
+        <figure class="my-6">
+          <img 
+            src={imageUrl} 
+            alt={altText}
+            class="max-w-full h-auto rounded" 
+            width={imageData.width}
+            height={imageData.height}
+            loading="lazy"
+          />
+          {caption && <figcaption class="text-sm text-gray-600 mt-2 text-center">{caption}</figcaption>}
+        </figure>
+      );
+    }
+    
+    // List block (ordered or unordered)
+    case 'list': {
+      const listBlock = block as BlockNode;
+      if (listBlock.format === 'ordered') {
+        return (
+          <ol class="list-decimal ml-6 my-4">
+            {listBlock.children && listBlock.children.map((item) => (
+              <li set:html={renderChildren((item as ListItemNode).children)} />
+            ))}
+          </ol>
+        );
+      } else {
+        return (
+          <ul class="list-disc ml-6 my-4">
+            {listBlock.children && listBlock.children.map((item) => (
+              <li set:html={renderChildren((item as ListItemNode).children)} />
+            ))}
+          </ul>
+        );
+      }
+    }
+    
+    // Quote block
+    case 'quote': {
+      const quoteBlock = block as BlockNode;
+      return (
+        <blockquote class="border-l-4 border-gray-300 pl-4 italic my-6 py-2">
+          <p set:html={renderChildren(quoteBlock.children)} />
+        </blockquote>
+      );
+    }
+    
+    // Code block
+    case 'code': {
+      const codeBlock = block as BlockNode;
+      const language = codeBlock.language || 'plaintext';
+      const codeText = codeBlock.children 
+        ? codeBlock.children.map(child => (child as TextNode).text).join('')
+        : '';
+        
+      return (
+        <pre class="bg-gray-100 p-4 rounded my-4 overflow-x-auto">
+          <code class={`language-${language}`}>
+            {codeText}
+          </code>
+        </pre>
+      );
+    }
+    
+    // Link block (standalone)
+    case 'link': {
+      const linkBlock = block as BlockNode;
+      if (!linkBlock.url) return null;
+      
+      const targetAttr = linkBlock.openInNewTab ? '_blank' : undefined;
+      const relAttr = linkBlock.openInNewTab ? 'noopener noreferrer' : undefined;
+      // Validate URL to prevent javascript: protocol exploitation
+      const safeUrl = validateUrl(linkBlock.url);
+      return (
+        <a 
+          href={safeUrl} 
+          target={targetAttr}
+          rel={relAttr}
+          class="text-blue-600 hover:underline"
+          set:html={renderChildren(linkBlock.children)} 
+        />
+      );
+    }
+    
+    // Fallback for unknown block types
+    default:
+      console.warn(`Unsupported block type: ${block.type}`);
+      return null;
+  }
+})}
+</div>
